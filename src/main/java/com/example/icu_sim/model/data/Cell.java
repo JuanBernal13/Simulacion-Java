@@ -1,4 +1,4 @@
-// backend/src/main/java/com/example/icu_sim/model/Cell.java
+// backend/src/main/java/com/example/icu_sim/model/data/Cell.java
 package com.example.icu_sim.model.data;
 
 import com.example.icu_sim.model.agents.Agent;
@@ -13,36 +13,67 @@ public class Cell {
     private List<Agent> agents;
     private KlebsiellaPneumoniae knn;
 
+    // Campos para UCI
+    private boolean isIcuCell;
+    private int icuCapacity;
+    private int usedBeds;
+
     public Cell(int x, int y) {
         this.x = x;
         this.y = y;
         this.agents = new ArrayList<>();
         this.knn = new KlebsiellaPneumoniae();
+        this.isIcuCell = false;
+        this.icuCapacity = 0;
+        this.usedBeds = 0;
     }
 
-    // Getters y Setters
+    public boolean isIcuCell() {
+        return isIcuCell;
+    }
+
+    public void setIcuCell(boolean icuCell) {
+        isIcuCell = icuCell;
+    }
+
+    public int getIcuCapacity() {
+        return icuCapacity;
+    }
+
+    public void setIcuCapacity(int icuCapacity) {
+        this.icuCapacity = icuCapacity;
+    }
+
+    public int getUsedBeds() {
+        return usedBeds;
+    }
+
+    public boolean hasFreeBed() {
+        return usedBeds < icuCapacity;
+    }
+
+    public void occupyBed() {
+        if (hasFreeBed()) {
+            usedBeds++;
+        }
+    }
+
+    public void freeBed() {
+        if (usedBeds > 0) {
+            usedBeds--;
+        }
+    }
+
     public int getX() {
         return x;
-    }
-
-    public void setX(int x) {
-        this.x = x;
     }
 
     public int getY() {
         return y;
     }
 
-    public void setY(int y) {
-        this.y = y;
-    }
-
     public List<Agent> getAgents() {
         return agents;
-    }
-
-    public void setAgents(List<Agent> agents) {
-        this.agents = agents;
     }
 
     public void addAgent(Agent agent) {

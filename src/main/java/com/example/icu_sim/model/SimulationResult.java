@@ -2,30 +2,24 @@
 package com.example.icu_sim.model;
 
 import com.example.icu_sim.model.agents.Agent;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
 import com.example.icu_sim.model.data.Cell;
 import com.example.icu_sim.model.data.Grid;
+
+import java.util.*;
 
 public class SimulationResult {
     private int totalWorkers;
     private int totalPatients;
     private List<Double> pctPatientsInfected;
     private List<Double> pctWorkersInfected;
-    private List<Map<String, Object>> gridState; // Estado del grid en cada paso
+    private List<Map<String, Object>> gridState;
 
-    // Constructor por defecto
     public SimulationResult() {
         this.pctPatientsInfected = new ArrayList<>();
         this.pctWorkersInfected = new ArrayList<>();
         this.gridState = new ArrayList<>();
     }
 
-    // Getters y Setters
     public int getTotalWorkers() {
         return totalWorkers;
     }
@@ -80,11 +74,13 @@ public class SimulationResult {
                 cellState.put("knnState", cell.getKnn().getState().toString());
                 cellState.put("knnSensitivity", cell.getKnn().getSensitivity().toString());
                 cellState.put("knnQuantity", cell.getKnn().getQuantity());
+
                 List<String> agentIds = new ArrayList<>();
                 for(Agent agent : cell.getAgents()) {
                     agentIds.add(agent.getUniqueId());
                 }
                 cellState.put("agents", agentIds);
+
                 cellStates.add(cellState);
             }
         }

@@ -7,7 +7,6 @@ import com.example.icu_sim.service.IcuSimulationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-// Importaciones de Spring Boot
 import org.springframework.web.bind.annotation.*;
 
 @RestController

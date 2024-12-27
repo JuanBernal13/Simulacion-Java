@@ -10,16 +10,13 @@ public abstract class Agent {
     public Agent(String uniqueId, Cell initialCell) {
         this.uniqueId = uniqueId;
         this.currentCell = initialCell;
-        this.currentCell.addAgent(this);
+        if (this.currentCell != null) {
+            this.currentCell.addAgent(this);
+        }
     }
 
-    // Getters y Setters
     public String getUniqueId() {
         return uniqueId;
-    }
-
-    public void setUniqueId(String uniqueId) {
-        this.uniqueId = uniqueId;
     }
 
     public Cell getCurrentCell() {
@@ -31,9 +28,10 @@ public abstract class Agent {
             this.currentCell.removeAgent(this);
         }
         this.currentCell = newCell;
-        this.currentCell.addAgent(this);
+        if (this.currentCell != null) {
+            this.currentCell.addAgent(this);
+        }
     }
 
-    // Método abstracto para simular el comportamiento en cada paso
     public abstract void step();
 }

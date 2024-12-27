@@ -1,4 +1,4 @@
-// backend/src/main/java/com/example/icu_sim/model/Grid.java
+// backend/src/main/java/com/example/icu_sim/model/data/Grid.java
 package com.example.icu_sim.model.data;
 
 public class Grid {
@@ -11,10 +11,16 @@ public class Grid {
         this.height = height;
         this.cells = new Cell[width][height];
 
-        // Inicializar celdas
         for(int x = 0; x < width; x++) {
             for(int y = 0; y < height; y++) {
-                cells[x][y] = new Cell(x, y);
+                Cell cell = new Cell(x, y);
+
+                // Ejemplo: dos últimas columnas como UCI
+                if(x > width - 3) {
+                    cell.setIcuCell(true);
+                    cell.setIcuCapacity(5); // cada celda UCI con 5 camas
+                }
+                cells[x][y] = cell;
             }
         }
     }
@@ -26,28 +32,15 @@ public class Grid {
         return null;
     }
 
-    // Getters y Setters
     public int getWidth() {
         return width;
-    }
-
-    public void setWidth(int width) {
-        this.width = width;
     }
 
     public int getHeight() {
         return height;
     }
 
-    public void setHeight(int height) {
-        this.height = height;
-    }
-
     public Cell[][] getCells() {
         return cells;
-    }
-
-    public void setCells(Cell[][] cells) {
-        this.cells = cells;
     }
 }

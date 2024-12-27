@@ -1,109 +1,328 @@
 // backend/src/main/java/com/example/icu_sim/service/IcuSimulationService.java
 package com.example.icu_sim.service;
 
-import com.example.icu_sim.model.*;
+import com.example.icu_sim.model.IcuSimulationRequest;
+import com.example.icu_sim.model.SimulationResult;
 import com.example.icu_sim.model.agents.Agent;
 import com.example.icu_sim.model.agents.HealthcareWorker;
 import com.example.icu_sim.model.agents.Patient;
 import com.example.icu_sim.model.bacteria.KlebsiellaPneumoniae;
+import com.example.icu_sim.model.bacteria.KlebsiellaPneumoniae.Sensitivity;
+import com.example.icu_sim.model.bacteria.KlebsiellaPneumoniae.State;
+import com.example.icu_sim.model.data.Cell;
+import com.example.icu_sim.model.data.Grid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import com.example.icu_sim.model.data.Cell;
-import com.example.icu_sim.model.data.Grid;
 
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.*;
 
 @Service
 public class IcuSimulationService {
 
     private static final Logger logger = LoggerFactory.getLogger(IcuSimulationService.class);
-    private Random random = new Random();
+    private Random random;
+    private double arrivalRate;
+    private double mutationRate;
+
+    // Buffer para guardar logs si es requerido
+    private StringBuilder simulationLogBuffer;
 
     public SimulationResult runSimulation(IcuSimulationRequest request) {
-        logger.info("Iniciando simulación ICU con los siguientes parámetros:");
-        logger.info("Número de Trabajadores: {}", request.getNWorkers());
-        logger.info("Número de Pacientes: {}", request.getNPatients());
-        logger.info("Número de Pasos: {}", request.getMaxSteps());
-        logger.info("Tamaño del Grid: {}x{}", request.getGridWidth(), request.getGridHeight());
+        // 1. Configurar semilla
+        if (request.getSeed() != 0) {
+            this.random = new Random(request.getSeed());
+            logger.info("Usando semilla fija: {}", request.getSeed());
+        } else {
+            this.random = new Random();
+            logger.info("Usando semilla aleatoria (no reproducible).");
+        }
 
-        // Inicializar Grid
+        this.arrivalRate = request.getArrivalRate();
+        this.mutationRate = request.getMutationRate();
+
+        // Si guardamos logs, inicializamos el buffer
+        if (request.isSaveLogs()) {
+            simulationLogBuffer = new StringBuilder();
+        }
+
+        logger.info("Iniciando simulación ICU con parámetros: {}", request);
+
+        // 2. Crear grid
         Grid grid = new Grid(request.getGridWidth(), request.getGridHeight());
 
-        // Inicializar agentes
+        // 3. Crear trabajadores
         List<HealthcareWorker> workers = new ArrayList<>();
-        List<Patient> patients = new ArrayList<>();
-
         for(int i = 0; i < request.getNWorkers(); i++) {
             Cell initialCell = getRandomCell(grid);
             HealthcareWorker hw = new HealthcareWorker("HW-" + i, initialCell);
+            // Ajustar hygieneFactor y ppeFactor
+            double hygieneVal = sampleNormal(request.getHygieneFactorMean(), request.getHygieneFactorStd());
+            hygieneVal = Math.min(Math.max(hygieneVal, 0.0), 1.0);
+            hw.setHygieneFactor(hygieneVal);
+            hw.setPpeFactor(request.getPpeFactor());
             workers.add(hw);
-            logger.debug("Agregado Trabajador de Salud: {}", hw.getUniqueId());
         }
 
+        // 4. Crear pacientes
+        List<Patient> patients = new ArrayList<>();
         for(int i = 0; i < request.getNPatients(); i++) {
             Cell initialCell = getRandomCell(grid);
             Patient p = new Patient("P-" + i, initialCell);
             patients.add(p);
-            logger.debug("Agregado Paciente: {}", p.getUniqueId());
         }
 
-        // Inicializar algunas celdas con KNN infectado y cantidad inicial
-        initializeKnnInfected(grid, 5, 500); // Infecta 5 celdas con 500 KNN cada una
+        // 5. Infectar algunas celdas
+        initializeKnnInfected(grid, 5, 300);
 
-        // Inicializar el objeto de resultados
+        // 6. Preparar resultado
         SimulationResult result = new SimulationResult();
         result.setTotalWorkers(workers.size());
         result.setTotalPatients(patients.size());
 
-        // Ejecutar pasos de simulación
+        // 7. Bucle de simulación
         for(int step = 1; step <= request.getMaxSteps(); step++) {
-            logger.debug("=== Paso de Simulación: {} ===", step);
+            logEvent(String.format("== Paso %d ==", step), request.isSaveLogs());
 
-            // Actualizar KNN en cada celda (reproducción, muerte y movimiento)
-            updateKnn(grid);
+            // (a) Llegada de nuevos pacientes
+            spawnNewPatientsIfAny(grid, patients, step, request.isSaveLogs());
 
-            // Actualizar agentes
+            // (b) Actualizar KNN
+            updateKnn(grid, request.isSaveLogs());
+
+            // (c) Actualizar Agentes
+            //    - Trabajadores
             for(HealthcareWorker hw : workers) {
                 hw.step();
-                moveAgent(hw, grid); // Movimiento opcional
+                if(random.nextDouble() < request.getWorkerMovementProb()) {
+                    moveAgent(hw, grid, request.isSaveLogs());
+                }
             }
 
+            //    - Pacientes
+            List<Patient> dischargedPatients = new ArrayList<>();
             for(Patient p : patients) {
                 p.step();
-                moveAgent(p, grid); // Movimiento opcional
+                if(!p.isInIcu() && random.nextDouble() < request.getPatientMovementProb()) {
+                    moveAgent(p, grid, request.isSaveLogs());
+                }
+                p.occupyIcuBedIfNeeded();
+                if(p.canBeDischarged()) {
+                    dischargedPatients.add(p);
+                }
             }
 
-            // Implementar lógica de Triage y tratamiento
-            assignResources(workers, patients, grid);
+            // (d) Dar de alta pacientes
+            for(Patient dp : dischargedPatients) {
+                if(dp.isInIcu()) {
+                    dp.getCurrentCell().freeBed();
+                }
+                dp.getCurrentCell().removeAgent(dp);
+                patients.remove(dp);
+                logEvent("Paciente " + dp.getUniqueId() + " ha sido dado de alta.", request.isSaveLogs());
+            }
 
-            // Recolectar datos del paso actual
-            long infectedPatients = patients.stream().filter(Patient::isInfected).count();
-            double pctPatientsInfected = (request.getNPatients() > 0) ?
-                    ((double) infectedPatients / request.getNPatients()) * 100 : 0.0;
+            // (e) Tratamientos
+            assignResources(workers, patients, grid, request.isSaveLogs());
+
+            // (f) Métricas
+            long infectedPatientsCount = patients.stream().filter(Patient::isInfected).count();
+            double pctPatientsInfected = (patients.size() > 0)
+                    ? (double) infectedPatientsCount / patients.size() * 100
+                    : 0.0;
             result.getPctPatientsInfected().add(pctPatientsInfected);
-            logger.debug("Paso {}: {}% de Pacientes Infectados", step, pctPatientsInfected);
 
-            long infectedWorkers = workers.stream().filter(HealthcareWorker::isInfected).count();
-            double pctWorkersInfected = (request.getNWorkers() > 0) ?
-                    ((double) infectedWorkers / request.getNWorkers()) * 100 : 0.0;
+            long infectedWorkersCount = workers.stream().filter(HealthcareWorker::isInfected).count();
+            double pctWorkersInfected = (workers.size() > 0)
+                    ? (double) infectedWorkersCount / workers.size() * 100
+                    : 0.0;
             result.getPctWorkersInfected().add(pctWorkersInfected);
-            logger.debug("Paso {}: {}% de Trabajadores Infectados", step, pctWorkersInfected);
 
-            // Guardar el estado del grid
+            // (g) Guardar estado grid
             result.addGridState(grid);
+
+            logEvent(String.format("Al final del paso %d => %%Pacientes Infectados: %.2f%%, %%Trabajadores Infectados: %.2f%%",
+                    step, pctPatientsInfected, pctWorkersInfected), request.isSaveLogs());
         }
 
-        // Registrar resultados finales
-        logger.info("Simulación completada.");
-        logger.info(String.format("Total Pacientes Infectados: %d (%.2f%%)",
-                patients.stream().filter(Patient::isInfected).count(),
-                (double) patients.stream().filter(Patient::isInfected).count() / request.getNPatients() * 100));
-        logger.info(String.format("Total Trabajadores Infectados: %d (%.2f%%)",
-                workers.stream().filter(HealthcareWorker::isInfected).count(),
-                (double) workers.stream().filter(HealthcareWorker::isInfected).count() / request.getNWorkers() * 100));
+        // 8. Al finalizar la simulación, si se activó saveLogs, generamos el archivo .txt
+        if(request.isSaveLogs()) {
+            writeLogsToFile("simulation_logs.txt");
+        }
 
+        logger.info("Simulación completada.");
         return result;
+    }
+
+    private void writeLogsToFile(String filename) {
+        try (FileWriter fw = new FileWriter(filename);
+             PrintWriter pw = new PrintWriter(fw)) {
+            pw.print(simulationLogBuffer.toString());
+            logger.info("Logs de simulación guardados en {}", filename);
+        } catch (IOException e) {
+            logger.error("Error escribiendo archivo de logs: {}", e.getMessage());
+        }
+    }
+
+    private void logEvent(String msg, boolean saveLogs) {
+        logger.debug(msg);
+        if(saveLogs && simulationLogBuffer != null) {
+            simulationLogBuffer.append(msg).append("\n");
+        }
+    }
+
+    private void spawnNewPatientsIfAny(Grid grid, List<Patient> patients, int step, boolean saveLogs) {
+        if(random.nextDouble() < arrivalRate) {
+            Cell cell = getRandomCell(grid);
+            String newId = "P-NEW-" + step + "-" + patients.size();
+            Patient newPatient = new Patient(newId, cell);
+            patients.add(newPatient);
+            logEvent("Ha llegado un nuevo paciente: " + newId, saveLogs);
+        }
+    }
+
+    private void moveAgent(Agent agent, Grid grid, boolean saveLogs) {
+        int currentX = agent.getCurrentCell().getX();
+        int currentY = agent.getCurrentCell().getY();
+
+        int newX = currentX + (random.nextInt(3) - 1);
+        int newY = currentY + (random.nextInt(3) - 1);
+
+        newX = Math.max(0, Math.min(newX, grid.getWidth() - 1));
+        newY = Math.max(0, Math.min(newY, grid.getHeight() - 1));
+
+        Cell newCell = grid.getCell(newX, newY);
+        if(newCell != null && newCell != agent.getCurrentCell()) {
+            agent.setCurrentCell(newCell);
+            logEvent(agent.getUniqueId() + " se movió a (" + newX + ", " + newY + ")", saveLogs);
+        }
+    }
+
+    private void assignResources(List<HealthcareWorker> workers, List<Patient> patients, Grid grid, boolean saveLogs) {
+        // Ordenar por prioridad
+        patients.sort((p1, p2) -> Double.compare(p2.getTriagePriority(), p1.getTriagePriority()));
+
+        for(Patient patient : patients) {
+            if(patient.getTriagePriority() > 0.0 && patient.isInfected()) {
+                applyTreatment(patient, patient.getKnn().getSensitivity(), saveLogs);
+            }
+        }
+    }
+
+    // Usamos la "semi-curación": pasa a partiallyCure() en lugar de 100% curar
+    private void applyTreatment(Patient patient, Sensitivity sensitivity, boolean saveLogs) {
+        double rnd = random.nextDouble();
+        switch(sensitivity) {
+            case SUSCEPTIBLE_TO_TREATMENT_A:
+                // 80% de exito => partially cure
+                if(rnd < 0.8) {
+                    patient.partiallyCure();
+                    logEvent("Tratamiento A exitoso para " + patient.getUniqueId(), saveLogs);
+                }
+                break;
+            case RESISTANT_TO_TREATMENT_A:
+                // 60% => partially cure
+                if(rnd < 0.6) {
+                    patient.partiallyCure();
+                    logEvent("Tratamiento B exitoso para " + patient.getUniqueId(), saveLogs);
+                }
+                break;
+            case SUSCEPTIBLE_TO_TREATMENT_C:
+                // 70% => partially cure
+                if(rnd < 0.7) {
+                    patient.partiallyCure();
+                    logEvent("Tratamiento C exitoso para " + patient.getUniqueId(), saveLogs);
+                }
+                break;
+            case RESISTANT_TO_TREATMENT_B:
+            case RESISTANT_TO_TREATMENT_C:
+                // 40% => partially cure
+                if(rnd < 0.4) {
+                    patient.partiallyCure();
+                    logEvent("Tratamiento agresivo exitoso para " + patient.getUniqueId(), saveLogs);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void updateKnn(Grid grid, boolean saveLogs) {
+        int width = grid.getWidth();
+        int height = grid.getHeight();
+
+        for(int x = 0; x < width; x++) {
+            for(int y = 0; y < height; y++) {
+                Cell cell = grid.getCell(x, y);
+                KlebsiellaPneumoniae knn = cell.getKnn();
+
+                knn.tryMutate(mutationRate);
+
+                if(knn.getState() == State.INFECTED && knn.getQuantity() > 0) {
+                    double reproductionRate = 0.1;
+                    if(random.nextDouble() < reproductionRate) {
+                        int growth = 4; // ajustado para evitar picos
+                        if(cell.isIcuCell()) {
+                            growth = 2;
+                        }
+                        knn.increaseQuantity(growth);
+                    }
+
+                    double deathRate = 0.03; // reducción leve
+                    if(random.nextDouble() < deathRate && knn.getQuantity() > 0) {
+                        knn.decreaseQuantity(4);
+                        if(knn.getQuantity() <= 0) {
+                            knn.setState(State.SUSCEPTIBLE);
+                        }
+                    }
+
+                    double movementChance = 0.08; // algo menor
+                    if(random.nextDouble() < movementChance && knn.getQuantity() >= 5) {
+                        int moveAmount = 5; // menos abrupto
+                        int targetX = x + (random.nextInt(3) - 1);
+                        int targetY = y + (random.nextInt(3) - 1);
+
+                        targetX = Math.max(0, Math.min(targetX, width - 1));
+                        targetY = Math.max(0, Math.min(targetY, height - 1));
+
+                        if(!(targetX == x && targetY == y)) {
+                            knn.decreaseQuantity(moveAmount);
+                            Cell targetCell = grid.getCell(targetX, targetY);
+                            KlebsiellaPneumoniae targetKnn = targetCell.getKnn();
+                            if(targetKnn.getState() == State.INFECTED
+                                    || targetKnn.getState() == State.SUSCEPTIBLE) {
+                                targetKnn.setState(State.INFECTED);
+                                targetKnn.increaseQuantity(moveAmount);
+                            }
+                            if(knn.getQuantity() <= 0) {
+                                knn.setState(State.SUSCEPTIBLE);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void initializeKnnInfected(Grid grid, int numberOfInfectedCells, int initialQuantity) {
+        int width = grid.getWidth();
+        int height = grid.getHeight();
+
+        for(int i = 0; i < numberOfInfectedCells; i++) {
+            int x = random.nextInt(width);
+            int y = random.nextInt(height);
+            Cell cell = grid.getCell(x, y);
+            if(cell.getKnn().getState() != State.INFECTED) {
+                cell.getKnn().setState(State.INFECTED);
+                cell.getKnn().setQuantity(initialQuantity);
+                logger.info("Celda ({}, {}) inicializada con KNN INFECTADO, cantidad {}", x, y, initialQuantity);
+            } else {
+                i--;
+            }
+        }
     }
 
     private Cell getRandomCell(Grid grid) {
@@ -112,154 +331,10 @@ public class IcuSimulationService {
         return grid.getCell(x, y);
     }
 
-    private void moveAgent(Agent agent, Grid grid) {
-        // Implementar lógica de movimiento aquí
-        // Por ejemplo, moverse a una celda adyacente aleatoria
-        int currentX = agent.getCurrentCell().getX();
-        int currentY = agent.getCurrentCell().getY();
-
-        int newX = currentX + random.nextInt(3) - 1; // -1, 0, 1
-        int newY = currentY + random.nextInt(3) - 1; // -1, 0, 1
-
-        // Asegurar que las nuevas coordenadas están dentro del grid
-        newX = Math.max(0, Math.min(newX, grid.getWidth() - 1));
-        newY = Math.max(0, Math.min(newY, grid.getHeight() - 1));
-
-        Cell newCell = grid.getCell(newX, newY);
-        if(newCell != null && newCell != agent.getCurrentCell()) {
-            agent.setCurrentCell(newCell);
-            logger.debug("{} se ha movido a la celda ({}, {}).", agent.getUniqueId(), newX, newY);
-        }
-    }
-
-    private void assignResources(List<HealthcareWorker> workers, List<Patient> patients, Grid grid) {
-        // Ordenar pacientes por prioridad de triage (descendente)
-        patients.sort((p1, p2) -> Double.compare(p2.getTriagePriority(), p1.getTriagePriority()));
-
-        for(Patient patient : patients) {
-            if(patient.getTriagePriority() > 0.0) {
-                // Asignar recursos, por ejemplo, tratamiento antibiótico basado en sensibilidad
-                KlebsiellaPneumoniae.Sensitivity sensitivity = patient.getKnn().getSensitivity();
-                applyTreatment(patient, sensitivity);
-            }
-        }
-    }
-
-    private void applyTreatment(Patient patient, KlebsiellaPneumoniae.Sensitivity sensitivity) {
-        // Implementar lógica de tratamiento aquí
-        // Por ejemplo, cambiar el estado de KNN basado en la sensibilidad
-        switch(sensitivity) {
-            case SUSCEPTIBLE_TO_TREATMENT_A:
-                // Simular tratamiento A exitoso
-                if(random.nextDouble() < 0.8) { // 80% de éxito
-                    patient.setColonized(false);
-                    patient.setTriagePriority(0.0);
-                    patient.getKnn().setState(KlebsiellaPneumoniae.State.SUSCEPTIBLE);
-                    patient.getKnn().resetQuantity(); // Resetear cantidad tras tratamiento
-                    logger.info("Tratamiento A exitoso para {}", patient.getUniqueId());
-                }
-                break;
-            case RESISTANT_TO_TREATMENT_A:
-                // Simular tratamiento B
-                if(random.nextDouble() < 0.6) { // 60% de éxito
-                    patient.setInfected(false);
-                    patient.setTriagePriority(0.0);
-                    patient.getKnn().setState(KlebsiellaPneumoniae.State.SUSCEPTIBLE);
-                    patient.getKnn().resetQuantity(); // Resetear cantidad tras tratamiento
-                    logger.info("Tratamiento B exitoso para {}", patient.getUniqueId());
-                }
-                break;
-            // Agrega más casos según sea necesario
-            default:
-                break;
-        }
-    }
-
-    private void initializeKnnInfected(Grid grid, int numberOfInfectedCells, int initialQuantity) {
-        // Seleccionar aleatoriamente algunas celdas para iniciar con KNN infectado
-        int width = grid.getWidth();
-        int height = grid.getHeight();
-
-        for(int i = 0; i < numberOfInfectedCells; i++) {
-            int x = random.nextInt(width);
-            int y = random.nextInt(height);
-            Cell cell = grid.getCell(x, y);
-            if(cell.getKnn().getState() != KlebsiellaPneumoniae.State.INFECTED) {
-                cell.getKnn().setState(KlebsiellaPneumoniae.State.INFECTED);
-                cell.getKnn().setQuantity(initialQuantity);
-                logger.info("Celda ({}, {}) inicializada con KNN INFECTADO y cantidad {}", x, y, initialQuantity);
-            } else {
-                // Si ya está infectado, intentar otra celda
-                i--;
-            }
-        }
-    }
-
-    private void updateKnn(Grid grid) {
-        // Crear una copia temporal para almacenar los cambios de KNN después del movimiento
-        int width = grid.getWidth();
-        int height = grid.getHeight();
-
-        for(int x = 0; x < width; x++) {
-            for(int y = 0; y < height; y++) {
-                Cell cell = grid.getCell(x, y);
-                KlebsiellaPneumoniae knn = cell.getKnn();
-                if(knn.getState() == KlebsiellaPneumoniae.State.INFECTED && knn.getQuantity() > 0) {
-                    // Reproducción
-                    double reproductionRate = 0.1; // 10% de probabilidad de reproducirse cada paso
-                    if(random.nextDouble() < reproductionRate) {
-                        knn.increaseQuantity(10); // Aumentar cantidad de KNN en 10
-                        logger.debug("KNN en celda ({}, {}) ha reproducido, nueva cantidad: {}", x, y, knn.getQuantity());
-                    }
-
-                    // Muerte
-                    double deathRate = 0.05; // 5% de probabilidad de morir cada paso
-                    if(random.nextDouble() < deathRate && knn.getQuantity() > 0) {
-                        knn.decreaseQuantity(5); // Disminuir cantidad de KNN en 5
-                        logger.debug("KNN en celda ({}, {}) ha muerto, nueva cantidad: {}", x, y, knn.getQuantity());
-                        if(knn.getQuantity() <= 0) {
-                            knn.setState(KlebsiellaPneumoniae.State.SUSCEPTIBLE);
-                            logger.info("KNN en celda ({}, {}) ha desaparecido.", x, y);
-                        }
-                    }
-
-                    // Movimiento
-                    double movementChance = 0.2; // 20% de probabilidad de mover KNN
-                    if(random.nextDouble() < movementChance && knn.getQuantity() >= 10) {
-                        // Mover 10 KNN a una celda adyacente aleatoria
-                        int moveAmount = 10;
-                        int targetX = x + random.nextInt(3) - 1; // -1, 0, 1
-                        int targetY = y + random.nextInt(3) - 1; // -1, 0, 1
-
-                        // Asegurar que las coordenadas de destino están dentro del grid
-                        targetX = Math.max(0, Math.min(targetX, width - 1));
-                        targetY = Math.max(0, Math.min(targetY, height - 1));
-
-                        if(targetX == x && targetY == y) {
-                            // No mover a la misma celda
-                            continue;
-                        }
-
-                        // Reducir KNN en la celda actual
-                        knn.decreaseQuantity(moveAmount);
-
-                        // Aumentar KNN en la celda de destino
-                        Cell targetCell = grid.getCell(targetX, targetY);
-                        KlebsiellaPneumoniae targetKnn = targetCell.getKnn();
-                        if(targetKnn.getState() == KlebsiellaPneumoniae.State.INFECTED || targetKnn.getState() == KlebsiellaPneumoniae.State.SUSCEPTIBLE) {
-                            targetKnn.setState(KlebsiellaPneumoniae.State.INFECTED);
-                            targetKnn.increaseQuantity(moveAmount);
-                            logger.debug("KNN se movió de ({}, {}) a ({}, {}) con cantidad {}", x, y, targetX, targetY, moveAmount);
-                        }
-
-                        // Si después del movimiento la cantidad es 0, cambiar el estado a SUSCEPTIBLE
-                        if(knn.getQuantity() <= 0) {
-                            knn.setState(KlebsiellaPneumoniae.State.SUSCEPTIBLE);
-                            logger.info("KNN en celda ({}, {}) ha desaparecido.", x, y);
-                        }
-                    }
-                }
-            }
-        }
+    private double sampleNormal(double mean, double stdDev) {
+        double u = random.nextDouble();
+        double v = random.nextDouble();
+        double z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        return mean + z * stdDev;
     }
 }
