@@ -1,4 +1,3 @@
-// backend/src/main/java/com/example/icu_sim/model/SimulationResult.java
 package com.example.icu_sim.model;
 
 import com.example.icu_sim.model.agents.Agent;
@@ -62,30 +61,26 @@ public class SimulationResult {
 
     public void addGridState(Grid grid) {
         Map<String, Object> state = new HashMap<>();
-        Cell[][] cells = grid.getCells();
-        List<Map<String, Object>> cellStates = new ArrayList<>();
-
-        for(int x = 0; x < grid.getWidth(); x++) {
-            for(int y = 0; y < grid.getHeight(); y++) {
-                Cell cell = cells[x][y];
-                Map<String, Object> cellState = new HashMap<>();
-                cellState.put("x", x);
-                cellState.put("y", y);
-                cellState.put("knnState", cell.getKnn().getState().toString());
-                cellState.put("knnSensitivity", cell.getKnn().getSensitivity().toString());
-                cellState.put("knnQuantity", cell.getKnn().getQuantity());
+        List<Map<String, Object>> cellsData = new ArrayList<>();
+        for(int x=0; x<grid.getWidth(); x++) {
+            for(int y=0; y<grid.getHeight(); y++) {
+                Cell cell = grid.getCell(x, y);
+                Map<String, Object> cellInfo = new HashMap<>();
+                cellInfo.put("x", x);
+                cellInfo.put("y", y);
+                cellInfo.put("knnState", cell.getKnn().getState().toString());
+                cellInfo.put("knnSensitivity", cell.getKnn().getSensitivity().toString());
+                cellInfo.put("knnQuantity", cell.getKnn().getQuantity());
 
                 List<String> agentIds = new ArrayList<>();
-                for(Agent agent : cell.getAgents()) {
-                    agentIds.add(agent.getUniqueId());
+                for(Agent ag : cell.getAgents()) {
+                    agentIds.add(ag.getUniqueId());
                 }
-                cellState.put("agents", agentIds);
-
-                cellStates.add(cellState);
+                cellInfo.put("agents", agentIds);
+                cellsData.add(cellInfo);
             }
         }
-
-        state.put("cells", cellStates);
+        state.put("cells", cellsData);
         this.gridState.add(state);
     }
 }

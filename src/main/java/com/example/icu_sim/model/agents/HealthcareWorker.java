@@ -1,4 +1,3 @@
-// backend/src/main/java/com/example/icu_sim/model/agents/HealthcareWorker.java
 package com.example.icu_sim.model.agents;
 
 import com.example.icu_sim.model.bacteria.KlebsiellaPneumoniae;
@@ -16,9 +15,8 @@ public class HealthcareWorker extends Agent {
     private KlebsiellaPneumoniae knn;
     private Random random;
 
-    // Nuevos
-    private double hygieneFactor; // (0..1)
-    private double ppeFactor;     // (0..1)
+    private double hygieneFactor;
+    private double ppeFactor;
 
     public HealthcareWorker(String uniqueId, Cell initialCell) {
         super(uniqueId, initialCell);
@@ -32,28 +30,25 @@ public class HealthcareWorker extends Agent {
     @Override
     public void step() {
         if (!infected) {
-            KlebsiellaPneumoniae knnInCell = getCurrentCell().getKnn();
-            if (knnInCell.getState() == State.INFECTED && knnInCell.getQuantity() > 0) {
-                double baseColonizationChance = 0.15; // 15%
+            KlebsiellaPneumoniae cellKnn = getCurrentCell().getKnn();
+            if(cellKnn.getState() == State.INFECTED && cellKnn.getQuantity() > 0) {
+                // Base chance
+                double baseChance = 0.15;
+                double effectiveChance = baseChance * (1 - hygieneFactor) * (1 - ppeFactor);
 
-                // Ajustar prob de infección con higiene y EPP
-                double effectiveChance = baseColonizationChance
-                        * (1.0 - hygieneFactor)
-                        * (1.0 - ppeFactor);
-
-                if (random.nextDouble() < effectiveChance) {
+                if(random.nextDouble() < effectiveChance) {
                     this.infected = true;
                     this.knn.setState(State.INFECTED);
-                    logger.info("{} se ha infectado con KNN.", getUniqueId());
+                    logger.info("{} se ha infectado (worker).", getUniqueId());
                 }
             }
         } else {
-            // Lógica de recuperación
-            double recoveryChance = 0.05;
-            if (random.nextDouble() < recoveryChance) {
+            // chance de recuperarse
+            double recoveryChance = 0.03; // un poco baja para que se mantenga infectado
+            if(random.nextDouble() < recoveryChance) {
                 this.infected = false;
                 this.knn.setState(State.SUSCEPTIBLE);
-                logger.info("{} se ha recuperado de KNN.", getUniqueId());
+                logger.info("{} se ha recuperado (worker).", getUniqueId());
             }
         }
     }

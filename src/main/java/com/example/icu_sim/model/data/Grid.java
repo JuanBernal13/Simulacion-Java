@@ -1,4 +1,3 @@
-// backend/src/main/java/com/example/icu_sim/model/data/Grid.java
 package com.example.icu_sim.model.data;
 
 public class Grid {
@@ -13,14 +12,13 @@ public class Grid {
 
         for(int x = 0; x < width; x++) {
             for(int y = 0; y < height; y++) {
-                Cell cell = new Cell(x, y);
-
-                // Ejemplo: dos últimas columnas como UCI
-                if(x > width - 3) {
-                    cell.setIcuCell(true);
-                    cell.setIcuCapacity(5); // cada celda UCI con 5 camas
+                Cell c = new Cell(x, y);
+                // Ej: las 2 últimas columnas son UCI
+                if(x >= width - 2) {
+                    c.setIcuCell(true);
+                    c.setIcuCapacity(4);
                 }
-                cells[x][y] = cell;
+                cells[x][y] = c;
             }
         }
     }
@@ -32,15 +30,7 @@ public class Grid {
         return null;
     }
 
-    public int getWidth() {
-        return width;
-    }
-
-    public int getHeight() {
-        return height;
-    }
-
-    public Cell[][] getCells() {
-        return cells;
-    }
+    public int getWidth() { return width; }
+    public int getHeight() { return height; }
+    public Cell[][] getCells() { return cells; }
 }

@@ -1,4 +1,3 @@
-// backend/src/main/java/com/example/icu_sim/model/agents/Patient.java
 package com.example.icu_sim.model.agents;
 
 import com.example.icu_sim.model.bacteria.KlebsiellaPneumoniae;
@@ -16,9 +15,12 @@ public class Patient extends Agent {
     private boolean colonized;
     private KlebsiellaPneumoniae knn;
     private double triagePriority;
-
     private boolean inIcu;
     private Random random;
+
+    // Ajustaremos en tiempo de ejecución:
+    private double colonizationChance;
+    private double infectionFromColonizedChance;
 
     public Patient(String uniqueId, Cell initialCell) {
         super(uniqueId, initialCell);
@@ -28,126 +30,116 @@ public class Patient extends Agent {
         this.triagePriority = 0.0;
         this.inIcu = false;
         this.random = new Random();
+
+        // Valores por defecto. Luego, en el servicio, los cambiamos al asignar
+        this.colonizationChance = 0.25;
+        this.infectionFromColonizedChance = 0.15;
     }
 
     @Override
     public void step() {
-        // Ajustamos las probabilidades para evitar picos tan bruscos
-        double colonizationChance = 0.15; // antes 0.25
-        double infectionChanceFromColonized = 0.10; // antes 0.20
-
         if (!infected && !colonized) {
-            KlebsiellaPneumoniae knnInCell = getCurrentCell().getKnn();
-            if (knnInCell.getState() == State.INFECTED && knnInCell.getQuantity() > 0) {
-                if (random.nextDouble() < colonizationChance) {
+            KlebsiellaPneumoniae cellKnn = getCurrentCell().getKnn();
+            if(cellKnn.getState() == State.INFECTED && cellKnn.getQuantity() > 0) {
+                if(random.nextDouble() < colonizationChance) {
                     this.colonized = true;
                     this.knn.setState(State.COLONIZED);
-                    logger.info("{} se ha colonizado con KNN.", getUniqueId());
+                    logger.info("{} se ha colonizado (patient).", getUniqueId());
                 }
             }
         }
 
-        // De COLONIZED a INFECTED (bajamos la prob.)
-        if (colonized && !infected) {
-            if (random.nextDouble() < infectionChanceFromColonized) {
+        if(colonized && !infected) {
+            if(random.nextDouble() < infectionFromColonizedChance) {
                 this.infected = true;
                 this.knn.setState(State.INFECTED);
-                logger.info("{} se ha infectado con KNN.", getUniqueId());
+                logger.info("{} se ha infectado (patient).", getUniqueId());
             }
         }
 
-        // Ajustar prioridad
+        // Asignar prioridad
         if (infected) {
-            this.triagePriority = 1.0;
+            triagePriority = 1.0;
         } else if (colonized) {
-            this.triagePriority = 0.5;
+            triagePriority = 0.5;
         } else {
-            this.triagePriority = 0.0;
+            triagePriority = 0.0;
         }
     }
 
-    // Pacientes se curan de "infected", pero podemos dejarlos en COLONIZED
-    // para que no desaparezca toda la infección de golpe.
     public void partiallyCure() {
-        // 70% chance de curarse completamente, 30% chance quedar colonizado
-        double chanceRemainColonized = 0.3;
-        if (random.nextDouble() < chanceRemainColonized) {
+        // 50% chance de quedar colonizado tras curar infección
+        double remainColonizedChance = 0.5;
+        if(random.nextDouble() < remainColonizedChance) {
             this.infected = false;
             this.colonized = true;
             this.knn.setState(State.COLONIZED);
-            logger.info("{} se curó de la infección pero sigue colonizado.", getUniqueId());
+            logger.info("{} se curó pero sigue colonizado.", getUniqueId());
         } else {
-            // Curación total
             this.infected = false;
             this.colonized = false;
             this.knn.setState(State.SUSCEPTIBLE);
             this.knn.resetQuantity();
-            logger.info("{} se ha curado totalmente (sin colonización).", getUniqueId());
+            logger.info("{} se curó totalmente (patient).", getUniqueId());
         }
     }
 
-    // Para reducir la salida masiva de la simulación, bajamos la prob de discharge
     public boolean canBeDischarged() {
-        // Ejemplo: 2% en vez de 5%
-        if (!infected && !colonized && random.nextDouble() < 0.02) {
+        // Probabilidad moderada de alta
+        if(!infected && !colonized && random.nextDouble() < 0.05) {
             return true;
         }
         return false;
     }
 
-    // Métodos UCI
     public void occupyIcuBedIfNeeded() {
-        if (this.triagePriority >= 1.0 && !this.inIcu) {
-            if (!getCurrentCell().isIcuCell()) {
+        if(triagePriority >= 1.0 && !inIcu) {
+            if(!getCurrentCell().isIcuCell()) {
                 return;
             }
-            if (getCurrentCell().hasFreeBed()) {
+            if(getCurrentCell().hasFreeBed()) {
                 getCurrentCell().occupyBed();
-                this.inIcu = true;
-                logger.info("{} ha ingresado a la UCI (celda {}, {}).",
+                inIcu = true;
+                logger.info("{} entró a la UCI (celda {}, {})",
                         getUniqueId(), getCurrentCell().getX(), getCurrentCell().getY());
             }
         }
     }
 
     // Getters & Setters
-    public boolean isInfected() {
-        return infected;
+    public double getColonizationChance() {
+        return colonizationChance;
     }
 
-    public void setInfected(boolean infected) {
-        this.infected = infected;
+    public void setColonizationChance(double colonizationChance) {
+        this.colonizationChance = colonizationChance;
+    }
+
+    public double getInfectionFromColonizedChance() {
+        return infectionFromColonizedChance;
+    }
+
+    public void setInfectionFromColonizedChance(double infectionFromColonizedChance) {
+        this.infectionFromColonizedChance = infectionFromColonizedChance;
+    }
+
+    public boolean isInfected() {
+        return infected;
     }
 
     public boolean isColonized() {
         return colonized;
     }
 
-    public void setColonized(boolean colonized) {
-        this.colonized = colonized;
-    }
-
     public KlebsiellaPneumoniae getKnn() {
         return knn;
-    }
-
-    public void setKnn(KlebsiellaPneumoniae knn) {
-        this.knn = knn;
     }
 
     public double getTriagePriority() {
         return triagePriority;
     }
 
-    public void setTriagePriority(double triagePriority) {
-        this.triagePriority = triagePriority;
-    }
-
     public boolean isInIcu() {
         return inIcu;
-    }
-
-    public void setInIcu(boolean inIcu) {
-        this.inIcu = inIcu;
     }
 }

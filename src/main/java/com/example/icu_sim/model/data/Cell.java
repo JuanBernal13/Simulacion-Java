@@ -1,4 +1,3 @@
-// backend/src/main/java/com/example/icu_sim/model/data/Cell.java
 package com.example.icu_sim.model.data;
 
 import com.example.icu_sim.model.agents.Agent;
@@ -13,7 +12,6 @@ public class Cell {
     private List<Agent> agents;
     private KlebsiellaPneumoniae knn;
 
-    // Campos para UCI
     private boolean isIcuCell;
     private int icuCapacity;
     private int usedBeds;
@@ -44,37 +42,26 @@ public class Cell {
         this.icuCapacity = icuCapacity;
     }
 
-    public int getUsedBeds() {
-        return usedBeds;
-    }
-
     public boolean hasFreeBed() {
         return usedBeds < icuCapacity;
     }
 
     public void occupyBed() {
-        if (hasFreeBed()) {
+        if(hasFreeBed()) {
             usedBeds++;
         }
     }
 
     public void freeBed() {
-        if (usedBeds > 0) {
+        if(usedBeds > 0) {
             usedBeds--;
         }
     }
 
-    public int getX() {
-        return x;
-    }
+    public int getX() { return x; }
+    public int getY() { return y; }
 
-    public int getY() {
-        return y;
-    }
-
-    public List<Agent> getAgents() {
-        return agents;
-    }
+    public List<Agent> getAgents() { return agents; }
 
     public void addAgent(Agent agent) {
         this.agents.add(agent);

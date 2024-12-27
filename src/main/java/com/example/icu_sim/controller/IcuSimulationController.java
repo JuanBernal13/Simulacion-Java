@@ -1,4 +1,3 @@
-// backend/src/main/java/com/example/icu_sim/controller/IcuSimulationController.java
 package com.example.icu_sim.controller;
 
 import com.example.icu_sim.model.IcuSimulationRequest;
@@ -18,14 +17,12 @@ public class IcuSimulationController {
     @Autowired
     private IcuSimulationService simulationService;
 
-    // Endpoint para ejecutar la simulación
     @PostMapping("/run")
     public SimulationResult runSimulation(@RequestBody IcuSimulationRequest request) {
         logger.info("Received simulation request: {}", request.toString());
         return simulationService.runSimulation(request);
     }
 
-    // Endpoint para verificar la salud del servicio
     @GetMapping("/health")
     public String getHealth() {
         return "ICU Simulation Service is running!";

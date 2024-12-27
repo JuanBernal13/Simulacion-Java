@@ -1,4 +1,3 @@
-// backend/src/main/java/com/example/icu_sim/model/bacteria/KlebsiellaPneumoniae.java
 package com.example.icu_sim.model.bacteria;
 
 import java.util.Random;
@@ -11,7 +10,6 @@ public class KlebsiellaPneumoniae {
         INFECTED
     }
 
-    // Se amplían las sensibilidades
     public enum Sensitivity {
         SUSCEPTIBLE_TO_TREATMENT_A,
         RESISTANT_TO_TREATMENT_A,
@@ -23,7 +21,7 @@ public class KlebsiellaPneumoniae {
 
     private State state;
     private Sensitivity sensitivity;
-    private int quantity; // Número de microorganismos KNN en la celda
+    private int quantity;
 
     private static final Random random = new Random();
 
@@ -33,7 +31,6 @@ public class KlebsiellaPneumoniae {
         this.quantity = 0;
     }
 
-    // Getters y Setters
     public State getState() {
         return state;
     }
@@ -58,7 +55,6 @@ public class KlebsiellaPneumoniae {
         this.quantity = quantity;
     }
 
-    // Métodos para incrementar y decrementar la cantidad
     public void increaseQuantity(int amount) {
         this.quantity += amount;
     }
@@ -71,15 +67,10 @@ public class KlebsiellaPneumoniae {
         this.quantity = 0;
     }
 
-    /**
-     * Simula la mutación de la bacteria cambiando su sensibilidad aleatoriamente
-     * con una pequeña probabilidad.
-     */
     public void tryMutate(double mutationRate) {
-        if (random.nextDouble() < mutationRate) {
-            // Seleccionamos otra sensibilidad de forma aleatoria
-            Sensitivity[] values = Sensitivity.values();
-            this.sensitivity = values[random.nextInt(values.length)];
+        if(random.nextDouble() < mutationRate) {
+            Sensitivity[] vals = Sensitivity.values();
+            this.sensitivity = vals[random.nextInt(vals.length)];
         }
     }
 }
