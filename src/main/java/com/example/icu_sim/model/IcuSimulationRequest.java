@@ -8,23 +8,34 @@ public class IcuSimulationRequest {
     // Parámetros principales
     private int nPatients = 50;
     private int nWorkers = 10;
-    private int maxSteps = 30;
+    private int maxSteps = 26280; // 365 días * 24 pasos/día (8 horas * 3 pasos/hora)
     private int gridWidth = 10;
     private int gridHeight = 10;
 
     // Parámetros de probabilidades
-    private double arrivalRate = 0.01;
+    private double arrivalRate = 0.01; // Probabilidad de llegada de un nuevo paciente por paso
     private double mutationRate = 0.01;
 
-    private double hygieneFactorMean = 0.5;
+    private double hygieneFactorMean = 0.6; // Aumentado de 0.5 a 0.6
     private double hygieneFactorStd = 0.1;
-    private double ppeFactor = 0.3;
-    private double workerMovementProb = 0.8;
-    private double patientMovementProb = 0.5;
+    private double ppeFactor = 0.5; // Aumentado de 0.3 a 0.5
+    private double workerMovementProb = 0.1; // Probabilidad de movimiento por paso
+    private double patientMovementProb = 0.05; // Probabilidad de movimiento por paso
 
     // NUEVOS: controlar colonización e infección
     private double colonizationChance = 0.25;        // p(colonización)
-    private double infectionFromColonizedChance = 0.15; // p(infectarse si colonizado)
+    private double infectionFromColonizedChance = 0.15; // p(infectarse si colonizado
+
+    // Nuevos parámetros para gestión de tiempo
+    private int stepsPerDay = 24; // 8 horas * 3 pasos por hora
+    private int workingHoursPerDay = 8; // 8 horas diarias
+    private int minutesPerStep = 20; // 20 minutos por paso
+
+    // Nuevos parámetros para control de infección de trabajadores
+    private double workerBaseInfectionChance = 0.02; // Probabilidad base de infección por paso
+
+    // Nuevos parámetros para pacientes en UCI
+    private double icuPatientInfectionFactor = 1.5; // Factor adicional de susceptibilidad en UCI
 
     private long seed = 0;       // 0 => random distinto cada vez
     private boolean saveLogs = false; // Para guardar logs en archivo .txt
@@ -74,6 +85,31 @@ public class IcuSimulationRequest {
     public double getInfectionFromColonizedChance() { return infectionFromColonizedChance; }
     public void setInfectionFromColonizedChance(double infectionFromColonizedChance) { this.infectionFromColonizedChance = infectionFromColonizedChance; }
 
+    public int getStepsPerDay() { return stepsPerDay; }
+    public void setStepsPerDay(int stepsPerDay) { this.stepsPerDay = stepsPerDay; }
+
+    public int getWorkingHoursPerDay() { return workingHoursPerDay; }
+    public void setWorkingHoursPerDay(int workingHoursPerDay) { this.workingHoursPerDay = workingHoursPerDay; }
+
+    public int getMinutesPerStep() { return minutesPerStep; }
+    public void setMinutesPerStep(int minutesPerStep) { this.minutesPerStep = minutesPerStep; }
+
+    public double getWorkerBaseInfectionChance() {
+        return workerBaseInfectionChance;
+    }
+
+    public void setWorkerBaseInfectionChance(double workerBaseInfectionChance) {
+        this.workerBaseInfectionChance = workerBaseInfectionChance;
+    }
+
+    public double getIcuPatientInfectionFactor() {
+        return icuPatientInfectionFactor;
+    }
+
+    public void setIcuPatientInfectionFactor(double icuPatientInfectionFactor) {
+        this.icuPatientInfectionFactor = icuPatientInfectionFactor;
+    }
+
     public long getSeed() { return seed; }
     public void setSeed(long seed) { this.seed = seed; }
 
@@ -97,6 +133,11 @@ public class IcuSimulationRequest {
                 ", patientMovementProb=" + patientMovementProb +
                 ", colonizationChance=" + colonizationChance +
                 ", infectionFromColonizedChance=" + infectionFromColonizedChance +
+                ", stepsPerDay=" + stepsPerDay +
+                ", workingHoursPerDay=" + workingHoursPerDay +
+                ", minutesPerStep=" + minutesPerStep +
+                ", workerBaseInfectionChance=" + workerBaseInfectionChance +
+                ", icuPatientInfectionFactor=" + icuPatientInfectionFactor +
                 ", seed=" + seed +
                 ", saveLogs=" + saveLogs +
                 '}';

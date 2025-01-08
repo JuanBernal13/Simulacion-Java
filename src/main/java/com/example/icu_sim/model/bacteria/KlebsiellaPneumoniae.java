@@ -23,14 +23,38 @@ public class KlebsiellaPneumoniae {
     private Sensitivity sensitivity;
     private int quantity;
 
+    // Nuevas variables
+    private double virulenceFactor; // 0.0 a 1.0
+    private double reproductionRate; // Tasa de reproducción por paso
+
     private static final Random random = new Random();
 
     public KlebsiellaPneumoniae() {
         this.state = State.SUSCEPTIBLE;
         this.sensitivity = Sensitivity.SUSCEPTIBLE_TO_TREATMENT_A;
         this.quantity = 0;
+        this.virulenceFactor = 0.5; // Valor por defecto
+        this.reproductionRate = 0.1; // Valor por defecto
     }
 
+    // Getters y Setters para las nuevas variables
+    public double getVirulenceFactor() {
+        return virulenceFactor;
+    }
+
+    public void setVirulenceFactor(double virulenceFactor) {
+        this.virulenceFactor = virulenceFactor;
+    }
+
+    public double getReproductionRate() {
+        return reproductionRate;
+    }
+
+    public void setReproductionRate(double reproductionRate) {
+        this.reproductionRate = reproductionRate;
+    }
+
+    // Resto de getters y setters
     public State getState() {
         return state;
     }
@@ -68,7 +92,7 @@ public class KlebsiellaPneumoniae {
     }
 
     public void tryMutate(double mutationRate) {
-        if(random.nextDouble() < mutationRate) {
+        if (random.nextDouble() < mutationRate) {
             Sensitivity[] vals = Sensitivity.values();
             this.sensitivity = vals[random.nextInt(vals.length)];
         }

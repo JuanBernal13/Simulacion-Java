@@ -26,6 +26,12 @@ public class IcuSimulationService {
     private Random random;
     private StringBuilder logBuffer;
 
+    // Listas de agentes y grid
+    private List<HealthcareWorker> workers;
+    private List<Patient> patients;
+    private Grid grid;
+    private SimulationResult result;
+
     public SimulationResult runSimulation(IcuSimulationRequest request) {
         // Semilla
         if(request.getSeed() != 0) {
@@ -44,30 +50,23 @@ public class IcuSimulationService {
         logger.info("Iniciando simulación: {}", request);
 
         // Crear Grid
-        Grid grid = new Grid(request.getGridWidth(), request.getGridHeight());
+        grid = new Grid(request.getGridWidth(), request.getGridHeight());
 
         // Crear Workers
-        List<HealthcareWorker> workers = new ArrayList<>();
+        workers = new ArrayList<>();
         for(int i=0; i<request.getNWorkers(); i++){
             Cell c = getRandomCell(grid);
-            HealthcareWorker hw = new HealthcareWorker("HW-"+i, c);
-
             double hVal = sampleNormal(request.getHygieneFactorMean(), request.getHygieneFactorStd());
             hVal = Math.max(0, Math.min(1, hVal));
-            hw.setHygieneFactor(hVal);
-            hw.setPpeFactor(request.getPpeFactor());
-
+            HealthcareWorker hw = new HealthcareWorker("HW-"+i, c, hVal, request.getPpeFactor(), request.getWorkerBaseInfectionChance());
             workers.add(hw);
         }
 
         // Crear Pacientes
-        List<Patient> patients = new ArrayList<>();
+        patients = new ArrayList<>();
         for(int i=0; i<request.getNPatients(); i++){
             Cell c = getRandomCell(grid);
-            Patient p = new Patient("P-"+i, c);
-            // Ajustar prob. colonización/infección desde request
-            p.setColonizationChance(request.getColonizationChance());
-            p.setInfectionFromColonizedChance(request.getInfectionFromColonizedChance());
+            Patient p = new Patient("P-"+i, c, request.getColonizationChance(), request.getInfectionFromColonizedChance());
             patients.add(p);
         }
 
@@ -75,52 +74,33 @@ public class IcuSimulationService {
         initializeInfectedCells(grid, 8, 200); // Infecta 8 celdas con 200 de KNN
 
         // Objeto resultado
-        SimulationResult result = new SimulationResult();
+        result = new SimulationResult();
         result.setTotalWorkers(workers.size());
         result.setTotalPatients(patients.size());
 
-        // Bucle
+        // Bucle de simulación
         for(int step=1; step<=request.getMaxSteps(); step++){
             logEvent("== Paso " + step + " ==", request.isSaveLogs());
 
             // 1. Llega algún paciente
-            spawnNewPatients(grid, patients, request);
+            spawnNewPatients(grid, request);
 
             // 2. Actualizar KNN
-            updateKnn(grid, request);
+            updateKnn(request);
 
             // 3. Mover y step() en Workers
             for(HealthcareWorker hw : workers){
-                hw.step();
-                if(random.nextDouble() < request.getWorkerMovementProb()) {
-                    moveAgent(hw, grid, request.isSaveLogs());
-                }
+                hw.step(step, this);
             }
 
             // 4. Mover y step() en Patients
-            List<Patient> discharged = new ArrayList<>();
-            for(Patient p : patients){
-                p.step();
-                if(!p.isInIcu() && random.nextDouble() < request.getPatientMovementProb()) {
-                    moveAgent(p, grid, request.isSaveLogs());
-                }
-                p.occupyIcuBedIfNeeded();
-                if(p.canBeDischarged()) {
-                    discharged.add(p);
-                }
-            }
-            // Dar de alta
-            for(Patient dp : discharged){
-                if(dp.isInIcu()) {
-                    dp.getCurrentCell().freeBed();
-                }
-                dp.getCurrentCell().removeAgent(dp);
-                patients.remove(dp);
-                logEvent("Dado de alta: "+dp.getUniqueId(), request.isSaveLogs());
+            for(Patient p : new ArrayList<>(patients)){
+                p.step(step, this);
+                p.occupyIcuBedIfNeeded(this);
             }
 
             // 5. Asignar tratamiento
-            applyTreatments(workers, patients, request);
+            applyTreatments(request);
 
             // 6. Métricas
             long infectedP = patients.stream().filter(Patient::isInfected).count();
@@ -131,8 +111,9 @@ public class IcuSimulationService {
             double pctW = workers.size()>0 ? (infectedW*100.0)/workers.size() : 0.0;
             result.getPctWorkersInfected().add(pctW);
 
-            // 7. Guardar grid
+            // 7. Guardar grid y bacterias
             result.addGridState(grid);
+            result.addBacteriaCounts(grid);
 
             logEvent(String.format("Paso %d => PacInfect=%.2f%%, WorkInfect=%.2f%%",
                     step, pctP, pctW), request.isSaveLogs());
@@ -147,7 +128,7 @@ public class IcuSimulationService {
         return result;
     }
 
-    private void applyTreatments(List<HealthcareWorker> workers, List<Patient> patients, IcuSimulationRequest req) {
+    private void applyTreatments(IcuSimulationRequest req) {
         // Ordenar pacientes según triage
         patients.sort((p1, p2) -> Double.compare(p2.getTriagePriority(), p1.getTriagePriority()));
 
@@ -164,21 +145,21 @@ public class IcuSimulationService {
         switch(s){
             case SUSCEPTIBLE_TO_TREATMENT_A:
                 // 70% => partially cure
-                if(r<0.7) {
+                if(r < 0.7) {
                     patient.partiallyCure();
                     logEvent("Tratamiento A para "+patient.getUniqueId(), saveLogs);
                 }
                 break;
             case RESISTANT_TO_TREATMENT_A:
                 // 50% => partially cure
-                if(r<0.5) {
+                if(r < 0.5) {
                     patient.partiallyCure();
                     logEvent("Tratamiento B para "+patient.getUniqueId(), saveLogs);
                 }
                 break;
-            case SUSCEPTIBLE_TO_TREATMENT_C:
+            case SUSCEPTIBLE_TO_TREATMENT_B:
                 // 60% => partially cure
-                if(r<0.6) {
+                if(r < 0.6) {
                     patient.partiallyCure();
                     logEvent("Tratamiento C para "+patient.getUniqueId(), saveLogs);
                 }
@@ -186,7 +167,7 @@ public class IcuSimulationService {
             case RESISTANT_TO_TREATMENT_B:
             case RESISTANT_TO_TREATMENT_C:
                 // 40% => partially cure
-                if(r<0.4) {
+                if(r < 0.4) {
                     patient.partiallyCure();
                     logEvent("Tratamiento agresivo para "+patient.getUniqueId(), saveLogs);
                 }
@@ -196,28 +177,26 @@ public class IcuSimulationService {
         }
     }
 
-    private void spawnNewPatients(Grid grid, List<Patient> patients, IcuSimulationRequest req) {
+    private void spawnNewPatients(Grid grid, IcuSimulationRequest req) {
         if(random.nextDouble() < req.getArrivalRate()) {
             Cell c = getRandomCell(grid);
             String id = "P-NEW-"+patients.size();
-            Patient newP = new Patient(id, c);
-            newP.setColonizationChance(req.getColonizationChance());
-            newP.setInfectionFromColonizedChance(req.getInfectionFromColonizedChance());
+            Patient newP = new Patient(id, c, req.getColonizationChance(), req.getInfectionFromColonizedChance());
             patients.add(newP);
             logEvent("Llega nuevo paciente: "+id, req.isSaveLogs());
         }
     }
 
-    private void updateKnn(Grid grid, IcuSimulationRequest req) {
+    private void updateKnn(IcuSimulationRequest req) {
         for(int x=0; x<grid.getWidth(); x++){
             for(int y=0; y<grid.getHeight(); y++){
                 Cell cell = grid.getCell(x,y);
                 KlebsiellaPneumoniae knn = cell.getKnn();
                 knn.tryMutate(req.getMutationRate());
 
-                if(knn.getState()== State.INFECTED && knn.getQuantity()>0){
-                    // Reproducción
-                    if(random.nextDouble() < 0.2) { // 20% chance
+                if(knn.getState() == State.INFECTED && knn.getQuantity() > 0){
+                    // Reproducción dependiente de la tasa específica
+                    if(random.nextDouble() < knn.getReproductionRate()) {
                         int growth = 5;
                         if(cell.isIcuCell()) growth = 3;
                         knn.increaseQuantity(growth);
@@ -226,50 +205,86 @@ public class IcuSimulationService {
                     // Muerte
                     if(random.nextDouble() < 0.03){ // 3%
                         knn.decreaseQuantity(5);
-                        if(knn.getQuantity()<=0){
+                        if(knn.getQuantity() <= 0){
                             knn.setState(State.SUSCEPTIBLE);
                         }
                     }
 
-                    // Movimiento
-                    if(random.nextDouble()<0.1 && knn.getQuantity()>=10){
-                        int moveAmount = 10;
-                        int nx = x + (random.nextInt(3)-1);
-                        int ny = y + (random.nextInt(3)-1);
-
-                        nx = Math.max(0, Math.min(nx, grid.getWidth()-1));
-                        ny = Math.max(0, Math.min(ny, grid.getHeight()-1));
-
-                        if(!(nx==x && ny==y)){
-                            knn.decreaseQuantity(moveAmount);
-                            Cell targetCell = grid.getCell(nx, ny);
-                            KlebsiellaPneumoniae tknn = targetCell.getKnn();
-                            if(tknn.getState()==State.SUSCEPTIBLE || tknn.getState()==State.INFECTED) {
-                                tknn.setState(State.INFECTED);
-                                tknn.increaseQuantity(moveAmount);
-                            }
-                            if(knn.getQuantity()<=0){
-                                knn.setState(State.SUSCEPTIBLE);
-                            }
-                        }
+                    // Movimiento más dinámico
+                    double movementProbability = calculateMovementProbability(knn, cell, grid);
+                    if(random.nextDouble() < movementProbability && knn.getQuantity() >= 10){
+                        moveBacteria(cell, grid, knn, x, y, req);
                     }
                 }
             }
         }
     }
 
+    private double calculateMovementProbability(KlebsiellaPneumoniae knn, Cell cell, Grid grid) {
+        double baseMovement;
+        switch(knn.getState()) {
+            case INFECTED:
+                baseMovement = 0.3; // Mayor probabilidad de movimiento
+                break;
+            case COLONIZED:
+                baseMovement = 0.1;
+                break;
+            default:
+                baseMovement = 0.05;
+        }
+        double densityFactor = knn.getQuantity() / 100.0;
+        double virulenceFactor = knn.getVirulenceFactor();
+        return baseMovement * (1 + densityFactor) * virulenceFactor;
+    }
+
+    private void moveBacteria(Cell currentCell, Grid grid, KlebsiellaPneumoniae knn, int x, int y, IcuSimulationRequest req) {
+        List<Cell> potentialCells = new ArrayList<>();
+        // Obtener celdas vecinas con menos bacterias
+        for(int dx=-1; dx<=1; dx++) {
+            for(int dy=-1; dy<=1; dy++) {
+                int nx = x + dx;
+                int ny = y + dy;
+                if(nx >=0 && nx < grid.getWidth() && ny >=0 && ny < grid.getHeight()) {
+                    Cell neighbor = grid.getCell(nx, ny);
+                    if(neighbor.getKnn().getQuantity() < currentCell.getKnn().getQuantity()) {
+                        potentialCells.add(neighbor);
+                    }
+                }
+            }
+        }
+        if(!potentialCells.isEmpty()) {
+            Cell targetCell = potentialCells.get(random.nextInt(potentialCells.size()));
+            int moveAmount = Math.min(10, knn.getQuantity());
+            knn.decreaseQuantity(moveAmount);
+            KlebsiellaPneumoniae tknn = targetCell.getKnn();
+            if(tknn.getState() == State.SUSCEPTIBLE || tknn.getState() == State.INFECTED) {
+                tknn.setState(State.INFECTED);
+                tknn.increaseQuantity(moveAmount);
+                logEvent(String.format("KNN se movió de (%d,%d) a (%d,%d) con cantidad %d",
+                        x, y, targetCell.getX(), targetCell.getY(), moveAmount), req.isSaveLogs());
+            }
+            if(knn.getQuantity() <= 0){
+                knn.setState(State.SUSCEPTIBLE);
+            }
+        }
+    }
+
     private void initializeInfectedCells(Grid grid, int count, int quantity) {
-        for(int i=0; i<count; i++){
+        int attempts = 0;
+        while(count > 0 && attempts < grid.getWidth() * grid.getHeight()) {
             int x = random.nextInt(grid.getWidth());
             int y = random.nextInt(grid.getHeight());
             Cell cell = grid.getCell(x,y);
-            if(cell.getKnn().getState()!=State.INFECTED){
+            if(cell.getKnn().getState() != State.INFECTED){
                 cell.getKnn().setState(State.INFECTED);
                 cell.getKnn().setQuantity(quantity);
                 logger.info("Celda ({},{}) infectada con {} KNN", x,y,quantity);
-            } else {
-                i--;
+                count--;
             }
+            attempts++;
+        }
+        if(count > 0){
+            logger.warn("No se pudo infectar el número deseado de celdas.");
         }
     }
 
@@ -286,7 +301,8 @@ public class IcuSimulationService {
         return mean + z*std;
     }
 
-    private void moveAgent(Agent a, Grid grid, boolean saveLogs){
+    // Métodos para mover y gestionar agentes
+    public void moveAgent(Agent a) {
         int cx = a.getCurrentCell().getX();
         int cy = a.getCurrentCell().getY();
 
@@ -297,15 +313,20 @@ public class IcuSimulationService {
         ny = Math.max(0, Math.min(ny, grid.getHeight()-1));
 
         Cell nextCell = grid.getCell(nx, ny);
-        if(nextCell!= null && nextCell != a.getCurrentCell()){
+        if(nextCell != null && nextCell != a.getCurrentCell()){
             a.setCurrentCell(nextCell);
-            logEvent(a.getUniqueId()+" se movió a ("+nx+","+ny+")", saveLogs);
+            logEvent(a.getUniqueId()+" se movió a ("+nx+","+ny+")", false);
         }
+    }
+
+    public void removePatient(Patient p) {
+        patients.remove(p);
+        result.setTotalPatients(patients.size());
     }
 
     private void logEvent(String msg, boolean saveLogs){
         logger.debug(msg);
-        if(saveLogs && logBuffer!=null){
+        if(saveLogs && logBuffer != null){
             logBuffer.append(msg).append("\n");
         }
     }

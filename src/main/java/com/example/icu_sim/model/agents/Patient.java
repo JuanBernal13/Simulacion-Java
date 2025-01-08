@@ -1,5 +1,6 @@
 package com.example.icu_sim.model.agents;
 
+import com.example.icu_sim.service.IcuSimulationService;
 import com.example.icu_sim.model.bacteria.KlebsiellaPneumoniae;
 import com.example.icu_sim.model.bacteria.KlebsiellaPneumoniae.State;
 import com.example.icu_sim.model.data.Cell;
@@ -22,7 +23,10 @@ public class Patient extends Agent {
     private double colonizationChance;
     private double infectionFromColonizedChance;
 
-    public Patient(String uniqueId, Cell initialCell) {
+    // Nuevo: factor de susceptibilidad
+    private double susceptibilityFactor;
+
+    public Patient(String uniqueId, Cell initialCell, double colonizationChance, double infectionFromColonizedChance) {
         super(uniqueId, initialCell);
         this.infected = false;
         this.colonized = false;
@@ -32,16 +36,32 @@ public class Patient extends Agent {
         this.random = new Random();
 
         // Valores por defecto. Luego, en el servicio, los cambiamos al asignar
-        this.colonizationChance = 0.25;
-        this.infectionFromColonizedChance = 0.15;
+        this.colonizationChance = colonizationChance;
+        this.infectionFromColonizedChance = infectionFromColonizedChance;
+
+        // Inicializar susceptibilidad
+        if (initialCell.isIcuCell()) {
+            this.susceptibilityFactor = 1.5; // Mayor susceptibilidad en UCI
+        } else {
+            this.susceptibilityFactor = 1.0;
+        }
     }
 
     @Override
-    public void step() {
+    public void step(int currentStep, IcuSimulationService service) {
+        // Simular entrada y salida de pacientes
+        if (currentStep % 24 == 0) { // Cada día
+            // Posibilidad de alta
+            if (canBeDischarged()) {
+                dischargePatient(service);
+                return;
+            }
+        }
+
         if (!infected && !colonized) {
             KlebsiellaPneumoniae cellKnn = getCurrentCell().getKnn();
-            if(cellKnn.getState() == State.INFECTED && cellKnn.getQuantity() > 0) {
-                if(random.nextDouble() < colonizationChance) {
+            if (cellKnn.getState() == State.INFECTED && cellKnn.getQuantity() > 0) {
+                if (random.nextDouble() < colonizationChance * susceptibilityFactor) {
                     this.colonized = true;
                     this.knn.setState(State.COLONIZED);
                     logger.info("{} se ha colonizado (patient).", getUniqueId());
@@ -49,8 +69,8 @@ public class Patient extends Agent {
             }
         }
 
-        if(colonized && !infected) {
-            if(random.nextDouble() < infectionFromColonizedChance) {
+        if (colonized && !infected) {
+            if (random.nextDouble() < infectionFromColonizedChance * susceptibilityFactor) {
                 this.infected = true;
                 this.knn.setState(State.INFECTED);
                 logger.info("{} se ha infectado (patient).", getUniqueId());
@@ -65,12 +85,26 @@ public class Patient extends Agent {
         } else {
             triagePriority = 0.0;
         }
+
+        // Movilidad
+        if (random.nextDouble() < 0.05) { // 5% de probabilidad de movimiento por paso
+            service.moveAgent(this);
+        }
+    }
+
+    private void dischargePatient(IcuSimulationService service) {
+        if (inIcu) {
+            getCurrentCell().freeBed();
+        }
+        getCurrentCell().removeAgent(this);
+        service.removePatient(this);
+        logger.info("{} ha sido dado de alta del sistema.", getUniqueId());
     }
 
     public void partiallyCure() {
         // 50% chance de quedar colonizado tras curar infección
         double remainColonizedChance = 0.5;
-        if(random.nextDouble() < remainColonizedChance) {
+        if (random.nextDouble() < remainColonizedChance) {
             this.infected = false;
             this.colonized = true;
             this.knn.setState(State.COLONIZED);
@@ -85,23 +119,25 @@ public class Patient extends Agent {
     }
 
     public boolean canBeDischarged() {
-        // Probabilidad moderada de alta
-        if(!infected && !colonized && random.nextDouble() < 0.05) {
+        // Probabilidad moderada de alta si no está infectado ni colonizado
+        if (!infected && !colonized && random.nextDouble() < 0.05) {
             return true;
         }
         return false;
     }
 
-    public void occupyIcuBedIfNeeded() {
-        if(triagePriority >= 1.0 && !inIcu) {
-            if(!getCurrentCell().isIcuCell()) {
+    public void occupyIcuBedIfNeeded(IcuSimulationService service) {
+        if (triagePriority >= 1.0 && !inIcu) {
+            if (!getCurrentCell().isIcuCell()) {
                 return;
             }
-            if(getCurrentCell().hasFreeBed()) {
+            if (getCurrentCell().hasFreeBed()) {
                 getCurrentCell().occupyBed();
                 inIcu = true;
                 logger.info("{} entró a la UCI (celda {}, {})",
                         getUniqueId(), getCurrentCell().getX(), getCurrentCell().getY());
+                // Aumentar susceptibilidad al entrar en UCI
+                this.susceptibilityFactor = 1.5;
             }
         }
     }
@@ -141,5 +177,13 @@ public class Patient extends Agent {
 
     public boolean isInIcu() {
         return inIcu;
+    }
+
+    public double getSusceptibilityFactor() {
+        return susceptibilityFactor;
+    }
+
+    public void setSusceptibilityFactor(double susceptibilityFactor) {
+        this.susceptibilityFactor = susceptibilityFactor;
     }
 }

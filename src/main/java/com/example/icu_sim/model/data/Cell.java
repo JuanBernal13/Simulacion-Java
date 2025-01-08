@@ -47,13 +47,13 @@ public class Cell {
     }
 
     public void occupyBed() {
-        if(hasFreeBed()) {
+        if (hasFreeBed()) {
             usedBeds++;
         }
     }
 
     public void freeBed() {
-        if(usedBeds > 0) {
+        if (usedBeds > 0) {
             usedBeds--;
         }
     }

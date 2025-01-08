@@ -13,10 +13,11 @@ public class Grid {
         for(int x = 0; x < width; x++) {
             for(int y = 0; y < height; y++) {
                 Cell c = new Cell(x, y);
-                // Ej: las 2 últimas columnas son UCI
-                if(x >= width - 2) {
+                // Designar las filas inferiores como UCI
+                // Por ejemplo, las últimas 2 filas
+                if(y >= height - 2) {
                     c.setIcuCell(true);
-                    c.setIcuCapacity(4);
+                    c.setIcuCapacity(4); // Capacidad de camas en UCI
                 }
                 cells[x][y] = c;
             }
